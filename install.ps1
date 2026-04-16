@@ -29,6 +29,12 @@ $WazuhSvc     = "WazuhSvc"
 $DestScript   = "$InstallDir\$ScriptName"
 $DestConfig   = "$InstallDir\$ConfigName"
 
+# ─── UTF-8 NO-BOM WRITER (reusable helper) ────────────────────────────────────
+# PowerShell 5.x Set-Content -Encoding UTF8 always prepends a UTF-8 BOM
+# (EF BB BF / \ufeff) which Python's json.loads() rejects.
+# Use UTF8Encoding($false) to write BOM-free UTF-8.
+$Utf8NoBom = New-Object System.Text.UTF8Encoding $false
+
 # ─── BANNER ──────────────────────────────────────────────────────────────────────────────────────
 Write-Host ""
 Write-Host "╔══════════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
@@ -135,11 +141,13 @@ try {
     Write-Host "[-] Download failed: $_" -ForegroundColor Red; exit 1
 }
 
-# ─── STEP 5: WRITE CONFIG ───────────────────────────────────────────────────────────────────────────────────────
+# ─── STEP 5: WRITE CONFIG (BOM-free UTF-8) ───────────────────────────────────────────────────────────────────────
+# FIX: Use [System.IO.File]::WriteAllText with UTF8Encoding($false) instead of
+# Set-Content -Encoding UTF8, which writes a UTF-8 BOM that Python's json.loads() rejects.
 Write-Host ""
-Write-Host "[5] Writing interval config..." -ForegroundColor Yellow
+Write-Host "[5] Writing interval config (BOM-free UTF-8)..." -ForegroundColor Yellow
 $ConfigJson = "{`"scan_interval_seconds`": $SECS, `"scan_interval_label`": `"$LABEL`"}"
-Set-Content -Path $DestConfig -Value $ConfigJson -Encoding UTF8
+[System.IO.File]::WriteAllText($DestConfig, $ConfigJson, $Utf8NoBom)
 Write-Host "    [+] Config: $DestConfig  [$LABEL = $SECS s]" -ForegroundColor Green
 
 # ─── STEP 6: KILL ANY OLD COLLECTOR PROCESS ───────────────────────────────────────────────────────────────────────
@@ -189,7 +197,8 @@ $SC = $WShell.CreateShortcut($ShortcutPath)
 $SC.TargetPath = $PythonWExe; $SC.Arguments = "`"$DestScript`""; $SC.WorkingDirectory = $InstallDir; $SC.Save()
 Write-Host "    [+] Shortcut: $ShortcutPath" -ForegroundColor Green
 
-# ─── STEP 9: WAZUH OSSEC.CONF ──────────────────────────────────────────────────────────────────────────────────────
+# ─── STEP 9: WAZUH OSSEC.CONF (BOM-free UTF-8) ──────────────────────────────────────────────────────────────────────────────────────
+# FIX: Same BOM issue applies here — use WriteAllText with UTF8Encoding($false).
 Write-Host ""
 Write-Host "[9] Updating Wazuh ossec.conf..." -ForegroundColor Yellow
 $Marker = "<!-- BROWSER_MONITOR_P2 -->"
@@ -198,7 +207,7 @@ if (Test-Path $WazuhConf) {
     if ($Content -notmatch [regex]::Escape($Marker)) {
         $Block = "`n  <!-- BROWSER_MONITOR_P2 -->`n  <localfile>`n    <location>$LogFile</location>`n    <log_format>syslog</log_format>`n  </localfile>"
         $Content = $Content -replace "</ossec_config>", "$Block`n</ossec_config>"
-        Set-Content -Path $WazuhConf -Value $Content -Encoding UTF8
+        [System.IO.File]::WriteAllText($WazuhConf, $Content, $Utf8NoBom)
         Write-Host "    [+] localfile block added" -ForegroundColor Green
         Restart-Service -Name $WazuhSvc -ErrorAction SilentlyContinue
         Start-Sleep -Seconds 3
