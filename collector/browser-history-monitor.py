@@ -19,6 +19,11 @@ FIXED in v3.1:
   - Clears stale logger handlers on startup to prevent duplicate/ghost handlers
   - Config path hardcoded to C:/BrowserMonitor on Windows (no working-dir dependency)
 
+FIXED in v3.1.1:
+  - Config reader uses utf-8-sig encoding to silently strip UTF-8 BOM (\ufeff)
+    if written by PowerShell 5.x Set-Content -Encoding UTF8 on older installs.
+    (Primary fix is in install.ps1 Step 5; this is a belt-and-suspenders defence.)
+
 Reads browser SQLite history databases every N seconds (configurable).
 Writes syslog-format lines to browser_history.log.
 Wazuh agent picks up the log via <localfile> in ossec.conf.
@@ -43,7 +48,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 # --- CONSTANTS ----------------------------------------------------------------
-VERSION            = "3.1"
+VERSION            = "3.1.1"
 CHROME_EPOCH_DIFF  = 11644473600
 MAC_EPOCH_DIFF     = 978307200
 LOG_FILE_NAME      = "browser_history.log"
@@ -107,11 +112,17 @@ class BrowserMonitor:
 
     # -- interval from config --------------------------------------------------
     def _load_interval(self):
-        """Read scan interval from config JSON. Falls back to 1800s if missing."""
+        """Read scan interval from config JSON. Falls back to 1800s if missing.
+
+        Uses utf-8-sig encoding so that a UTF-8 BOM written by PowerShell 5.x
+        Set-Content -Encoding UTF8 is silently stripped before json.load().
+        (The primary fix is the BOM-free writer in install.ps1 Step 5;
+        this encoding is a belt-and-suspenders defensive fallback.)
+        """
         config_path = self.install_dir / CONFIG_FILE_NAME
         if config_path.exists():
             try:
-                with open(config_path, 'r', encoding='utf-8') as f:
+                with open(config_path, 'r', encoding='utf-8-sig') as f:
                     cfg = json.load(f)
                 secs  = int(cfg.get("scan_interval_seconds", DEFAULT_INTERVAL))
                 label = str(cfg.get("scan_interval_label", "30m"))
