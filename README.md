@@ -433,8 +433,35 @@ Restart-Service WazuhSvc
 #### Uninstall (Windows)
 
 ```powershell
-Unregister-ScheduledTask -TaskName 'BrowserHistoryMonitor' -Confirm:$false
-Remove-Item 'C:\BrowserMonitor' -Recurse -Force
+# 1. Stop & remove scheduled task (ignore error if not found)
+Unregister-ScheduledTask -TaskName 'BrowserHistoryMonitor' -Confirm:$false -ErrorAction SilentlyContinue
+
+# 2. Kill any running Python collector process
+Get-Process -Name python* -ErrorAction SilentlyContinue | Stop-Process -Force
+
+# 3. Remove the BrowserMonitor folder (collector + log + config)
+Remove-Item 'C:\BrowserMonitor' -Recurse -Force -ErrorAction SilentlyContinue
+
+# 4. Remove the localfile block from ossec.conf
+(Get-Content 'C:\Program Files (x86)\ossec-agent\ossec.conf') |
+  Where-Object { $_ -notmatch 'BrowserMonitor|browser_history' } |
+  Set-Content 'C:\Program Files (x86)\ossec-agent\ossec.conf'
+
+# 5. Restart Wazuh agent to apply ossec.conf change
+Restart-Service WazuhSvc
+
+# 6. Confirm everything is clean
+Write-Host "--- Scheduled Task Check ---"
+Get-ScheduledTask | Where-Object { $_.TaskName -like '*Browser*' }
+
+Write-Host "--- BrowserMonitor Folder Check ---"
+Test-Path 'C:\BrowserMonitor'
+
+Write-Host "--- ossec.conf Check ---"
+Select-String 'BrowserMonitor' 'C:\Program Files (x86)\ossec-agent\ossec.conf'
+
+Write-Host "--- Wazuh Agent Status ---"
+Get-Service WazuhSvc
 ```
 
 ---
