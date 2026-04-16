@@ -2,7 +2,7 @@
 """
 Wazuh Browser History Monitor
 Author  : Ram Kumar G (IT Fortress)
-Version : 3.0 (Phase 2 - Configurable Interval Edition)
+Version : 3.1 (Phase 2 - Configurable Interval Edition)
 Platform: Windows | Linux | macOS
 Browsers: Chrome, Edge, Brave, Firefox, Opera, OperaGX, Vivaldi,
           Waterfox, Tor, Chromium, Safari (macOS)
@@ -14,6 +14,11 @@ NEW in v3.0 (Phase 2):
   - Falls back to 1800s (30m) if config missing
   - Logs interval on service_started event
 
+FIXED in v3.1:
+  - Logs version + PID in service_started for easier debugging
+  - Clears stale logger handlers on startup to prevent duplicate/ghost handlers
+  - Config path hardcoded to C:/BrowserMonitor on Windows (no working-dir dependency)
+
 Reads browser SQLite history databases every N seconds (configurable).
 Writes syslog-format lines to browser_history.log.
 Wazuh agent picks up the log via <localfile> in ossec.conf.
@@ -24,6 +29,7 @@ macOS Safari support (all versions):
 """
 
 import os
+import sys
 import time
 import sqlite3
 import shutil
@@ -37,11 +43,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 # --- CONSTANTS ----------------------------------------------------------------
+VERSION            = "3.1"
 CHROME_EPOCH_DIFF  = 11644473600
 MAC_EPOCH_DIFF     = 978307200
 LOG_FILE_NAME      = "browser_history.log"
 CONFIG_FILE_NAME   = ".browser_monitor_config.json"
-DEFAULT_INTERVAL   = 1800   # 30 minutes
+DEFAULT_INTERVAL   = 1800   # 30 minutes fallback
 
 # --- HELPERS ------------------------------------------------------------------
 def chrome_time(ts):
@@ -88,6 +95,7 @@ class BrowserMonitor:
 
     # -- paths -----------------------------------------------------------------
     def _get_install_dir(self):
+        """Always use absolute hardcoded path - never rely on working directory."""
         if self.os_type == "Windows":
             path = Path("C:/BrowserMonitor")
         elif self.os_type == "Darwin":
@@ -99,6 +107,7 @@ class BrowserMonitor:
 
     # -- interval from config --------------------------------------------------
     def _load_interval(self):
+        """Read scan interval from config JSON. Falls back to 1800s if missing."""
         config_path = self.install_dir / CONFIG_FILE_NAME
         if config_path.exists():
             try:
@@ -109,6 +118,7 @@ class BrowserMonitor:
                 return secs, label
             except Exception:
                 pass
+        # Config missing - log warning after logger is set up
         return DEFAULT_INTERVAL, "30m"
 
     # -- state -----------------------------------------------------------------
@@ -133,8 +143,18 @@ class BrowserMonitor:
     def _setup_logging(self):
         self.logger = logging.getLogger("BrowserMonitor")
         self.logger.setLevel(logging.INFO)
+
+        # CRITICAL FIX: always clear stale handlers from previous runs/processes
+        # Without this, ghost handlers from old Task Scheduler instances survive
+        # and cause duplicate log lines or missing service_started messages.
         if self.logger.handlers:
-            return
+            for h in self.logger.handlers[:]:
+                try:
+                    h.close()
+                except Exception:
+                    pass
+                self.logger.removeHandler(h)
+
         fmt = logging.Formatter(
             fmt='%(asctime)s ' + self.hostname + ' browser-monitor: %(message)s',
             datefmt='%b %d %H:%M:%S'
@@ -142,7 +162,15 @@ class BrowserMonitor:
         fh = logging.FileHandler(str(self.log_path), encoding='utf-8')
         fh.setFormatter(fmt)
         self.logger.addHandler(fh)
-        self.logger.info("service_started interval=%ds (%s)", self.scan_interval, self.interval_label)
+
+        # Log version + PID so you can confirm exactly which instance is running
+        config_path = self.install_dir / CONFIG_FILE_NAME
+        config_found = config_path.exists()
+        self.logger.info(
+            "service_started v%s pid=%d interval=%ds (%s) config=%s",
+            VERSION, os.getpid(), self.scan_interval, self.interval_label,
+            "found" if config_found else "MISSING-using-default-30m"
+        )
 
     # -- all user home dirs (Linux) --------------------------------------------
     def _get_all_home_dirs(self):
@@ -511,7 +539,7 @@ class BrowserMonitor:
                 self._save_state()
                 time.sleep(self.scan_interval)
         except KeyboardInterrupt:
-            self.logger.info("service_stopped")
+            self.logger.info("service_stopped pid=%d", os.getpid())
 
 
 if __name__ == "__main__":
