@@ -1,24 +1,26 @@
 #!/usr/bin/env python3
 """
-Wazuh Browser History Monitor — Phase 2
+Wazuh Browser History Monitor
 Author  : Ram Kumar G (IT Fortress)
-Version : 3.0 (Configurable SQLite interval monitoring)
+Version : 3.0 (Phase 2 - Configurable Interval Edition)
 Platform: Windows | Linux | macOS
 Browsers: Chrome, Edge, Brave, Firefox, Opera, OperaGX, Vivaldi,
           Waterfox, Tor, Chromium, Safari (macOS)
           All install types: standard, snap, flatpak
 
-Phase 2 Features:
-  - Configurable scan interval: 1m/5m/10m/20m/30m/60m/2h/6h/12h/24h
-  - Interval persisted to .browser_monitor_config.json (read by installer)
-  - Pure SQLite read approach — no History API dependency
-  - WAL-aware Safari support (all macOS versions)
-  - Extension change detection
+NEW in v3.0 (Phase 2):
+  - Reads scan interval from .browser_monitor_config.json
+  - Intervals: 1m / 5m / 10m / 20m / 30m / 60m / 2h / 6h / 12h / 24h
+  - Falls back to 1800s (30m) if config missing
+  - Logs interval on service_started event
 
-Interval is set at installation time and written to:
-  Windows : C:\\BrowserMonitor\\.browser_monitor_config.json
-  Linux   : ~/.browser-monitor/.browser_monitor_config.json
-  macOS   : ~/.browser-monitor/.browser_monitor_config.json
+Reads browser SQLite history databases every N seconds (configurable).
+Writes syslog-format lines to browser_history.log.
+Wazuh agent picks up the log via <localfile> in ossec.conf.
+
+macOS Safari support (all versions):
+  v2.7 - Detect journal_mode at runtime before copying.
+  v3.0 - Fully inherited from v2.7, no changes needed.
 """
 
 import os
@@ -35,24 +37,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 # --- CONSTANTS ----------------------------------------------------------------
-CHROME_EPOCH_DIFF = 11644473600
-MAC_EPOCH_DIFF    = 978307200
-
-DEFAULT_INTERVAL  = 60  # seconds — overridden by config file
-
-VALID_INTERVALS = {
-    "1m":   60,
-    "5m":   300,
-    "10m":  600,
-    "20m":  1200,
-    "30m":  1800,
-    "60m":  3600,
-    "2h":   7200,
-    "6h":   21600,
-    "12h":  43200,
-    "24h":  86400,
-}
-
+CHROME_EPOCH_DIFF  = 11644473600
+MAC_EPOCH_DIFF     = 978307200
+LOG_FILE_NAME      = "browser_history.log"
+CONFIG_FILE_NAME   = ".browser_monitor_config.json"
+DEFAULT_INTERVAL   = 1800   # 30 minutes
 
 # --- HELPERS ------------------------------------------------------------------
 def chrome_time(ts):
@@ -64,7 +53,6 @@ def chrome_time(ts):
     except Exception:
         return str(ts)
 
-
 def firefox_time(ts):
     if not ts:
         return "N/A"
@@ -73,7 +61,6 @@ def firefox_time(ts):
         return dt.strftime('%Y-%m-%d %H:%M:%S')
     except Exception:
         return str(ts)
-
 
 def safari_time(ts):
     if not ts:
@@ -92,18 +79,12 @@ class BrowserMonitor:
         self.hostname    = socket.gethostname()
         self.user_home   = Path.home()
         self.install_dir = self._get_install_dir()
-        self.log_path    = self.install_dir / "browser_history.log"
+        self.log_path    = self.install_dir / LOG_FILE_NAME
         self.state_path  = self.install_dir / ".browser_monitor_state.json"
-        self.cfg_path    = self.install_dir / ".browser_monitor_config.json"
         self.state       = self._load_state()
-        self.scan_interval = self._load_interval()
+        self.scan_interval, self.interval_label = self._load_interval()
         self._setup_logging()
         self._safari_schema_logged = False
-        self.logger.info(
-            "service_started interval=%ds (%s)",
-            self.scan_interval,
-            self._interval_label(self.scan_interval)
-        )
 
     # -- paths -----------------------------------------------------------------
     def _get_install_dir(self):
@@ -116,29 +97,19 @@ class BrowserMonitor:
         path.mkdir(parents=True, exist_ok=True)
         return path
 
-    # -- interval --------------------------------------------------------------
+    # -- interval from config --------------------------------------------------
     def _load_interval(self):
-        try:
-            if self.cfg_path.exists():
-                with open(self.cfg_path, 'r') as f:
+        config_path = self.install_dir / CONFIG_FILE_NAME
+        if config_path.exists():
+            try:
+                with open(config_path, 'r', encoding='utf-8') as f:
                     cfg = json.load(f)
-                    val = int(cfg.get("scan_interval_seconds", DEFAULT_INTERVAL))
-                    if val > 0:
-                        return val
-        except Exception:
-            pass
-        return DEFAULT_INTERVAL
-
-    @staticmethod
-    def _interval_label(seconds):
-        for label, secs in VALID_INTERVALS.items():
-            if secs == seconds:
-                return label
-        if seconds < 60:
-            return f"{seconds}s"
-        if seconds < 3600:
-            return f"{seconds//60}m"
-        return f"{seconds//3600}h"
+                secs  = int(cfg.get("scan_interval_seconds", DEFAULT_INTERVAL))
+                label = str(cfg.get("scan_interval_label", "30m"))
+                return secs, label
+            except Exception:
+                pass
+        return DEFAULT_INTERVAL, "30m"
 
     # -- state -----------------------------------------------------------------
     def _load_state(self):
@@ -171,6 +142,7 @@ class BrowserMonitor:
         fh = logging.FileHandler(str(self.log_path), encoding='utf-8')
         fh.setFormatter(fmt)
         self.logger.addHandler(fh)
+        self.logger.info("service_started interval=%ds (%s)", self.scan_interval, self.interval_label)
 
     # -- all user home dirs (Linux) --------------------------------------------
     def _get_all_home_dirs(self):

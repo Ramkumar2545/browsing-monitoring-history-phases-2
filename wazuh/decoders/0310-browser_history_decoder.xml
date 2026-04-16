@@ -1,0 +1,41 @@
+<!--
+  Wazuh Browser History Decoder
+  Author : Ram Kumar G (IT Fortress)
+  Version: 3.0 (Phase 2 - Interval Edition)
+
+  FIX (v2.8):
+    1. program_name hyphen escaped: browser\-monitor
+    2. Added <use_own_name> to parent so Wazuh tracks it by name
+    3. Child decoder has NO <prematch> — only <parent> + <regex>.
+
+  NEW (v3.0):
+    Added service_started interval= field decoding for Phase 2.
+
+  Raw log format (post syslog-strip, what decoders see):
+    2026-04-16 18:00:27 Safari blackweb Default https://www.facebook.com/ Facebook
+
+  Fields:
+    1. mon_browse_time     = 2026-04-16 18:00:27
+    2. mon_browser_name    = Safari
+    3. mon_username        = blackweb
+    4. mon_browser_profile = Default
+    5. mon_url             = https://www.facebook.com/
+    6. mon_page_title      = Facebook - Log in or sign up
+-->
+
+<decoder name="browser-monitor-service">
+  <program_name>^browser\-monitor$</program_name>
+  <prematch>^service_|^no_browser</prematch>
+</decoder>
+
+<!-- PARENT: match any visit line (starts with ISO timestamp) -->
+<decoder name="browser-monitor-log">
+  <program_name>^browser-monitor$</program_name>
+  <prematch>\d\d\d\d-\d\d-\d\d \d\d:\d\d:\d\d</prematch>
+</decoder>
+
+<decoder name="browser-monitor-log-fields">
+  <parent>browser-monitor-log</parent>
+  <regex type="pcre2">^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(.+)$</regex>
+  <order>mon_browse_time, mon_browser_name, mon_username, mon_browser_profile, mon_url, mon_page_title</order>
+</decoder>
