@@ -2,7 +2,7 @@
 .SYNOPSIS
     Wazuh Browser Monitor Phase 2 - Windows One-Line Installer
     Author  : Ram Kumar G (IT Fortress)
-    Version : 3.0 (Phase 2 - Configurable Interval)
+    Version : 3.1 (Phase 2 - Configurable Interval)
 
 .DESCRIPTION
     Downloads the Phase 2 collector from GitHub and installs it.
@@ -29,30 +29,37 @@ $WazuhSvc     = "WazuhSvc"
 $DestScript   = "$InstallDir\$ScriptName"
 $DestConfig   = "$InstallDir\$ConfigName"
 
-# ─── BANNER ───────────────────────────────────────────────────────────────────
+# ─── BANNER ──────────────────────────────────────────────────────────────────────────────────────
 Write-Host ""
 Write-Host "╔══════════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
-Write-Host "║  Wazuh Browser Monitor Phase 2 - Windows Installer           ║" -ForegroundColor Cyan
+Write-Host "║  Wazuh Browser Monitor Phase 2 - Windows Installer  v3.1      ║" -ForegroundColor Cyan
 Write-Host "║  IT Fortress | Configurable Interval | Task Scheduler        ║" -ForegroundColor Cyan
 Write-Host "╚══════════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
 Write-Host ""
 
-# ─── ADMIN CHECK ──────────────────────────────────────────────────────────────
+# ─── ADMIN CHECK ─────────────────────────────────────────────────────────────────────────────────────
 $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     Write-Host "[-] ERROR: Run this script as Administrator." -ForegroundColor Red
     exit 1
 }
 
-# ─── STEP 1: PYTHON DETECTION ─────────────────────────────────────────────────
+# ─── STEP 1: PYTHON DETECTION ─────────────────────────────────────────────────────────────────────────────
 Write-Host "[1] Detecting Python (System-Wide)..." -ForegroundColor Yellow
 $PythonExe  = $null
 $CommonPaths = @(
+    "C:\Program Files\Python314\python.exe",
     "C:\Program Files\Python313\python.exe",
     "C:\Program Files\Python312\python.exe",
     "C:\Program Files\Python311\python.exe",
     "C:\Program Files\Python310\python.exe",
+    "C:\Program Files\Python39\python.exe",
+    "C:\Program Files\Python38\python.exe",
+    "C:\Program Files (x86)\Python314\python.exe",
+    "C:\Program Files (x86)\Python313\python.exe",
     "C:\Program Files (x86)\Python312\python.exe",
+    "C:\Python314\python.exe",
+    "C:\Python313\python.exe",
     "C:\Python312\python.exe",
     "C:\Python311\python.exe"
 )
@@ -72,7 +79,7 @@ $PythonWExe = Join-Path $PyDir "pythonw.exe"
 if (-not (Test-Path $PythonWExe)) { $PythonWExe = $PythonExe }
 Write-Host "    [+] Windowless Python: $PythonWExe" -ForegroundColor Green
 
-# ─── STEP 2: INTERVAL SELECTION ───────────────────────────────────────────────
+# ─── STEP 2: INTERVAL SELECTION ─────────────────────────────────────────────────────────────────────────────
 Write-Host ""
 Write-Host "[2] Select scan interval:" -ForegroundColor Yellow
 Write-Host "     1)  1  minute   (high I/O)" -ForegroundColor Gray
@@ -108,7 +115,7 @@ $MINS       = $IntervalMap[$choice].Mins
 $RepeatMins = if ($MINS -ge 1440) { "1440" } else { "$MINS" }
 Write-Host "    [+] Selected: $LABEL ($SECS seconds)" -ForegroundColor Green
 
-# ─── STEP 3: CREATE INSTALL DIR ───────────────────────────────────────────────
+# ─── STEP 3: CREATE INSTALL DIR ────────────────────────────────────────────────────────────────────────────────────
 Write-Host ""
 Write-Host "[3] Creating $InstallDir..." -ForegroundColor Yellow
 if (-not (Test-Path $InstallDir)) { New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null }
@@ -117,7 +124,7 @@ $Ar  = New-Object System.Security.AccessControl.FileSystemAccessRule("BUILTIN\Us
 $Acl.SetAccessRule($Ar); Set-Acl $InstallDir $Acl
 Write-Host "    [+] Permissions set (BUILTIN\Users: Modify)" -ForegroundColor Green
 
-# ─── STEP 4: DOWNLOAD COLLECTOR ───────────────────────────────────────────────
+# ─── STEP 4: DOWNLOAD COLLECTOR ────────────────────────────────────────────────────────────────────────────────────
 Write-Host ""
 Write-Host "[4] Downloading Phase 2 collector..." -ForegroundColor Yellow
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -128,16 +135,31 @@ try {
     Write-Host "[-] Download failed: $_" -ForegroundColor Red; exit 1
 }
 
-# ─── STEP 5: WRITE CONFIG ─────────────────────────────────────────────────────
+# ─── STEP 5: WRITE CONFIG ───────────────────────────────────────────────────────────────────────────────────────
 Write-Host ""
 Write-Host "[5] Writing interval config..." -ForegroundColor Yellow
 $ConfigJson = "{`"scan_interval_seconds`": $SECS, `"scan_interval_label`": `"$LABEL`"}"
 Set-Content -Path $DestConfig -Value $ConfigJson -Encoding UTF8
 Write-Host "    [+] Config: $DestConfig  [$LABEL = $SECS s]" -ForegroundColor Green
 
-# ─── STEP 6: SCHEDULED TASK WITH REPEAT TRIGGER ───────────────────────────────
+# ─── STEP 6: KILL ANY OLD COLLECTOR PROCESS ───────────────────────────────────────────────────────────────────────
 Write-Host ""
-Write-Host "[6] Creating Scheduled Task: $TaskName (AtLogon + Repeat every $RepeatMins min)..." -ForegroundColor Yellow
+Write-Host "[6] Stopping any existing collector process..." -ForegroundColor Yellow
+$killed = $false
+Get-Process -Name python*, pythonw* -ErrorAction SilentlyContinue | ForEach-Object {
+    $cmdline = (Get-WmiObject Win32_Process -Filter "ProcessId=$($_.Id)" -ErrorAction SilentlyContinue).CommandLine
+    if ($cmdline -like "*browser-history-monitor*") {
+        Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
+        Write-Host "    [+] Killed old collector PID $($_.Id)" -ForegroundColor Green
+        $killed = $true
+    }
+}
+if (-not $killed) { Write-Host "    [=] No existing collector process found" -ForegroundColor Gray }
+Start-Sleep -Seconds 2
+
+# ─── STEP 7: SCHEDULED TASK WITH REPEAT TRIGGER ────────────────────────────────────────────────────────────────────────
+Write-Host ""
+Write-Host "[7] Creating Scheduled Task: $TaskName (AtLogon + Repeat every $RepeatMins min)..." -ForegroundColor Yellow
 
 $Action    = New-ScheduledTaskAction -Execute $PythonWExe -Argument "`"$DestScript`"" -WorkingDirectory $InstallDir
 $Trigger   = New-ScheduledTaskTrigger -AtLogon
@@ -157,9 +179,9 @@ $TaskXml | Register-ScheduledTask -TaskName $TaskName -Force | Out-Null
 
 Write-Host "    [+] Scheduled Task registered (AtLogon + repeat every $RepeatMins min)" -ForegroundColor Green
 
-# ─── STEP 7: STARTUP SHORTCUT FAILSAFE ────────────────────────────────────────
+# ─── STEP 8: STARTUP SHORTCUT FAILSAFE ──────────────────────────────────────────────────────────────────────────────────
 Write-Host ""
-Write-Host "[7] Creating startup shortcut (failsafe)..." -ForegroundColor Yellow
+Write-Host "[8] Creating startup shortcut (failsafe)..." -ForegroundColor Yellow
 $StartupDir   = "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\StartUp"
 $ShortcutPath = Join-Path $StartupDir "WazuhBrowserMonitor.lnk"
 $WShell = New-Object -ComObject WScript.Shell
@@ -167,9 +189,9 @@ $SC = $WShell.CreateShortcut($ShortcutPath)
 $SC.TargetPath = $PythonWExe; $SC.Arguments = "`"$DestScript`""; $SC.WorkingDirectory = $InstallDir; $SC.Save()
 Write-Host "    [+] Shortcut: $ShortcutPath" -ForegroundColor Green
 
-# ─── STEP 8: WAZUH OSSEC.CONF ─────────────────────────────────────────────────
+# ─── STEP 9: WAZUH OSSEC.CONF ──────────────────────────────────────────────────────────────────────────────────────
 Write-Host ""
-Write-Host "[8] Updating Wazuh ossec.conf..." -ForegroundColor Yellow
+Write-Host "[9] Updating Wazuh ossec.conf..." -ForegroundColor Yellow
 $Marker = "<!-- BROWSER_MONITOR_P2 -->"
 if (Test-Path $WazuhConf) {
     $Content = Get-Content $WazuhConf -Raw
@@ -185,24 +207,28 @@ if (Test-Path $WazuhConf) {
         else { Write-Host "    [!] Wazuh agent may need manual restart." -ForegroundColor Yellow }
     } else { Write-Host "    [=] localfile block already present" -ForegroundColor Gray }
 } else {
-    Write-Host "    [!] ossec.conf not found at $WazuhConf — add localfile block manually." -ForegroundColor Yellow
+    Write-Host "    [!] ossec.conf not found at $WazuhConf -- add localfile block manually." -ForegroundColor Yellow
     Write-Host "    Location: $LogFile  Format: syslog"
 }
 
-# ─── STEP 9: START NOW ────────────────────────────────────────────────────────
+# ─── STEP 10: START NOW ────────────────────────────────────────────────────────────────────────────────────────
 Write-Host ""
-Write-Host "[9] Starting collector now..." -ForegroundColor Yellow
+Write-Host "[10] Starting collector now..." -ForegroundColor Yellow
 Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+Start-Sleep -Seconds 3
 Write-Host "    [+] Task started" -ForegroundColor Green
 
-# ─── DONE ─────────────────────────────────────────────────────────────────────
+# ─── DONE ────────────────────────────────────────────────────────────────────────────────────────────────────
 Write-Host ""
 Write-Host "╔══════════════════════════════════════════════════════════════╗" -ForegroundColor Green
-Write-Host "║  [SUCCESS] Phase 2 Installation Complete!                    ║" -ForegroundColor Green
+Write-Host "║  [SUCCESS] Phase 2 Installation Complete!  v3.1              ║" -ForegroundColor Green
 Write-Host "╚══════════════════════════════════════════════════════════════╝" -ForegroundColor Green
 Write-Host ""
 Write-Host "  Interval : $LABEL ($SECS seconds)"
 Write-Host "  Log file : $LogFile"
 Write-Host "  Watch    : Get-Content '$LogFile' -Tail 20 -Wait" -ForegroundColor Cyan
 Write-Host "  Task     : Get-ScheduledTask -TaskName '$TaskName'" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "  Verify interval in log:"
+Write-Host "    service_started interval=${SECS}s ($LABEL)  <-- should match your choice" -ForegroundColor Green
 Write-Host ""
