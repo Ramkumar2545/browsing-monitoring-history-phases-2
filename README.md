@@ -81,6 +81,8 @@
    <localfile> in ossec.conf  →  Wazuh Agent  →  Manager
 ```
 
+![Architecture Diagram — Endpoints to Wazuh Manager](https://raw.githubusercontent.com/Ramkumar2545/browsing-monitoring-history-phases-2/main/docs/images/1.png)
+
 **Flow:**
 1. Installer prompts you to choose a scan interval (1m – 24h)
 2. Config JSON is written with the chosen interval in seconds
@@ -90,6 +92,8 @@
 6. Decoder parses fields (`browser`, `url`, `profile`, `username`, `hostname`)
 7. Rules fire alerts based on URL patterns & risk categories
 8. Alerts appear in Wazuh Dashboard with MITRE ATT&CK mapping
+
+![Data Flow Pipeline](https://raw.githubusercontent.com/Ramkumar2545/browsing-monitoring-history-phases-2/main/docs/images/2.png)
 
 ---
 
@@ -124,11 +128,15 @@
 | Linux | Ubuntu 20.04+, Debian 11+, AlmaLinux 8+, RHEL 8+, Python 3.8+ |
 | macOS | macOS 12+ (Monterey+), Python 3.8+ |
 
+![Full Access Requirements](https://raw.githubusercontent.com/Ramkumar2545/browsing-monitoring-history-phases-2/main/docs/images/3.jpg)
+
 > ⚠️ **Python must be installed system-wide on Windows** — check "Install for All Users" and "Add to PATH" during setup.
 
 ---
 
 ## ⚙️ PHASE 1 — Wazuh Manager Setup *(Do this ONCE on the Manager)*
+
+![Wazuh Manager Setup — Detection Pipeline](https://raw.githubusercontent.com/Ramkumar2545/browsing-monitoring-history-phases-2/main/docs/images/7.png)
 
 > 🖥️ These steps run **only on your Wazuh Manager server** and enable detection for ALL enrolled endpoints automatically.  
 > Phase 2 uses the **exact same decoder and rules** as Phase 1. If you have already deployed Phase 1 manager-side, **skip to [PHASE 2 — Endpoint Deploy](#-phase-2--endpoint-deploy-phase-2-collector)**.
@@ -329,6 +337,8 @@ Config file contents:
 
 ### 🪟 Windows Endpoint
 
+![Windows Endpoint — Deployment Architecture](https://raw.githubusercontent.com/Ramkumar2545/browsing-monitoring-history-phases-2/main/docs/images/4.png)
+
 #### Step 1 — Install Python (if not already installed)
 
 1. Download from [https://python.org/downloads](https://python.org/downloads)
@@ -469,6 +479,8 @@ Get-Service WazuhSvc
 ---
 
 ### 🐧 Linux Endpoint
+
+![Linux Endpoint — Deployment Architecture](https://raw.githubusercontent.com/Ramkumar2545/browsing-monitoring-history-phases-2/main/docs/images/5.png)
 
 > **Important:** The collector runs as **root** (via systemd SYSTEM service) so it can read browser profiles from all users on the machine — including snap/flatpak installs.  
 > The `RestartSec` of the systemd service is automatically set to your chosen interval.
@@ -644,6 +656,8 @@ rm -rf /root/.browser-monitor
 ---
 
 ### 🍎 macOS Endpoint
+
+![macOS Endpoint — Deployment Architecture](https://raw.githubusercontent.com/Ramkumar2545/browsing-monitoring-history-phases-2/main/docs/images/6.png)
 
 > **Note:** On macOS, the installer runs as the **current user** (do NOT use `sudo`). The LaunchAgent will have `StartInterval` set to your chosen interval in seconds.
 
