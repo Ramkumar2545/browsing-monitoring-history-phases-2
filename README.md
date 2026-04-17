@@ -93,13 +93,7 @@
 
 ---
 
----
 
-![Overall Architecture](docs/images/7-overall-architecture.png)
-![Full Access Requirements](docs/images/1-full-access-requirements.png)
-![Data Flow Pipeline](docs/images/2-data-flow-pipeline.png)
-
----
 
 ## Supported Browsers
 
