@@ -92,6 +92,7 @@
 8. Alerts appear in Wazuh Dashboard with MITRE ATT&CK mapping
 
 ---
+![Full Access Requirements](docs/images/full-access-requirements.jpg)
 
 ## Supported Browsers
 
