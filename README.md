@@ -92,7 +92,7 @@
 8. Alerts appear in Wazuh Dashboard with MITRE ATT&CK mapping
 
 ---
-
+![Overall Architecture](docs/images/7-overall-architecture.png)
 
 ## Supported Browsers
 
